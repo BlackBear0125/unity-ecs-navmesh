@@ -70,19 +70,13 @@ namespace Demo
             base.OnCreateManager (capacity);
             // create the system
             World.Active.CreateManager<NavAgentSystem> ();
-            World.Active.GetOrCreateManager<NavAgentToPositionSyncSystem> ();
-            World.Active.GetOrCreateManager<NavAgentToRotationSyncSystem>();
             agent = Getmanager ().CreateArchetype (
                 typeof (NavAgent),
                 // optional avoidance
                 // typeof(NavAgentAvoidance),
                 // optional
                  typeof (Position),
-                 typeof (Rotation),
-                 typeof (SyncPositionToNavAgent),
-                 typeof (SyncRotationToNavAgent),
-                 typeof (SyncPositionFromNavAgent),
-                 typeof (SyncRotationFromNavAgent)
+                 typeof (Rotation)
                 
             );
         }
@@ -116,20 +110,22 @@ namespace Demo
             for (var i = 0; i < pendingSpawn; i++)
             {
                 spawned++;
-                var position = buildings.GetResidentialBuilding ();
                 var entity = manager.CreateEntity (agent);
                 var navAgent = new NavAgent (
-                    position,
-                    Quaternion.identity,
                     spawnData.AgentStoppingDistance,
                     spawnData.AgentMoveSpeed,
                     spawnData.AgentAcceleration,
                     spawnData.AgentRotationSpeed,
                     spawnData.AgentAreaMask
                 );
+                var position = new Position()
+                {
+                    Value = buildings.GetResidentialBuilding()
+                };
                 // optional if set on the archetype
                 // manager.SetComponentData (entity, new Position { Value = position });
                 manager.SetComponentData (entity, navAgent);
+                manager.SetComponentData(entity, position);
                 // optional for avoidance
                 // var navAvoidance = new NavAgentAvoidance(2f);
                 // manager.SetComponentData(entity, navAvoidance);
@@ -186,20 +182,20 @@ namespace Demo
 
         private float _nextUpdate;
 
-        private NativeQueue<AgentData> needsPath = new NativeQueue<AgentData> (Allocator.Persistent);
+        private NativeQueue<int> needsPath = new NativeQueue<int> (Allocator.Persistent);
 
         [BurstCompile]
         private struct DetectIdleAgentJob : IJobParallelFor
         {
             public InjectData data;
-            public NativeQueue<AgentData>.Concurrent needsPath;
+            public NativeQueue<int>.Concurrent needsPath;
 
             public void Execute (int index)
             {
                 var agent = data.Agents[index];
                 if (data.Agents[index].status == AgentStatus.Idle)
                 {
-                    needsPath.Enqueue (new AgentData { index = index, agent = agent, entity = data.Entities[index] });
+                    needsPath.Enqueue (index);
                     agent.status = AgentStatus.PathQueued;
                     data.Agents[index] = agent;
                 }
@@ -209,13 +205,14 @@ namespace Demo
         private struct SetNextPathJob : IJob
         {
             public InjectData data;
-            public NativeQueue<AgentData> needsPath;
+            public NativeQueue<int> needsPath;
             public void Execute ()
             {
-                while (needsPath.TryDequeue (out AgentData item))
+                while (needsPath.TryDequeue (out int index))
                 {
                     var destination = BuildingCacheSystem.GetCommercialBuilding ();
-                    NavAgentSystem.SetDestinationStatic (item.entity, item.agent, destination, item.agent.areaMask);
+                    NavAgentSystem.SetDestinationStatic (data.Entities[index], data.Agents[index], 
+                        data.Positions[index], data.Rotations[index], destination);
                 }
             }
         }
@@ -225,6 +222,9 @@ namespace Demo
             public readonly int Length;
             [ReadOnly] public EntityArray Entities;
             public ComponentDataArray<NavAgent> Agents;
+            public ComponentDataArray<Position> Positions;
+            public ComponentDataArray<Rotation> Rotations;
+
         }
 
         [Inject] InjectData data;

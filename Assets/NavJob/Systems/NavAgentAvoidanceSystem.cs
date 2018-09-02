@@ -10,6 +10,7 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using NavJob.Components;
+using Unity.Transforms;
 
 namespace NavJob.Systems
 {
@@ -26,6 +27,8 @@ namespace NavJob.Systems
         {
             [ReadOnly] public EntityArray entities;
             public ComponentDataArray<NavAgent> agents;
+            [ReadOnly] public ComponentDataArray<Position> positions;
+            [ReadOnly] public ComponentDataArray<Rotation> rotations;
             public ComponentDataArray<NavAgentAvoidance> avoidances;
             [ReadOnly] public NativeMultiHashMap<int, int> indexMap;
             [ReadOnly] public NativeMultiHashMap<int, float3> nextPositionMap;
@@ -36,13 +39,15 @@ namespace NavJob.Systems
             public void ExecuteNext (int firstIndex, int index)
             {
                 var agent = agents[index];
+                var position = positions[index];
+                var rotation = rotations[index];
                 var avoidance = avoidances[index];
-                var move = Vector3.left;
+                float3 move = Vector3.left;
                 if (index % 2 == 1)
                 {
                     move = Vector3.right;
                 }
-                float3 drift = agent.rotation * (Vector3.forward + move) * agent.currentMoveSpeed * dt;
+                float3 drift = math.mul(rotation.Value, ((float3)Vector3.forward + move) * agent.currentMoveSpeed * dt);
                 if (agent.nextWaypointIndex != agent.totalWaypoints)
                 {
                     var offsetWaypoint = agent.currentWaypoint + drift;
@@ -53,14 +58,14 @@ namespace NavJob.Systems
                     }
                 }
                 agent.currentMoveSpeed = Mathf.Max (agent.currentMoveSpeed / 2f, 0.5f);
-                var positionInfo = navMeshQuery.MapLocation (agent.position + drift, Vector3.one * 3f, 0, agent.areaMask);
+                var positionInfo = navMeshQuery.MapLocation (position.Value + drift, Vector3.one * 3f, 0, agent.areaMask);
                 if (navMeshQuery.IsValid (positionInfo))
                 {
                     agent.nextPosition = positionInfo.position;
                 }
                 else
                 {
-                    agent.nextPosition = agent.position;
+                    agent.nextPosition = position.Value;
                 }
                 agents[index] = agent;
             }
@@ -70,6 +75,7 @@ namespace NavJob.Systems
         struct HashPositionsJob : IJobParallelFor
         {
             [ReadOnly] public ComponentDataArray<NavAgent> agents;
+            [ReadOnly] public ComponentDataArray<Position> positions;
             public ComponentDataArray<NavAgentAvoidance> avoidances;
             public NativeMultiHashMap<int, int>.Concurrent indexMap;
             public NativeMultiHashMap<int, float3>.Concurrent nextPositionMap;
@@ -78,8 +84,9 @@ namespace NavJob.Systems
             public void Execute (int index)
             {
                 var agent = agents[index];
+                var position = positions[index];
                 var avoidance = avoidances[index];
-                var hash = Hash (agent.position, avoidance.radius);
+                var hash = Hash (position.Value, avoidance.radius);
                 indexMap.Add (hash, index);
                 nextPositionMap.Add (hash, agent.nextPosition);
                 avoidance.partition = hash;

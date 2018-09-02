@@ -29,6 +29,8 @@ namespace NavJob.Systems
             public int index;
             public Entity entity;
             public NavAgent agent;
+            public Position position;
+            public Rotation rotation;
         }
 
         private NativeQueue<AgentData> needsWaypoint;
@@ -52,7 +54,14 @@ namespace NavJob.Systems
                 var entity = data.Entities[index];
                 if (agent.nextWaypointIndex != agent.totalWaypoints)
                 {
-                    needsWaypoint.Enqueue (new AgentData { agent = data.Agents[index], entity = entity, index = index });
+                    needsWaypoint.Enqueue (new AgentData
+                    {
+                        rotation = data.Rotations[index],
+                        position =  data.Positions[index],
+                        agent = data.Agents[index],
+                        entity = entity,
+                        index = index
+                    });
                 }
                 else if (navMeshQuerySystemVersion != agent.queryVersion || agent.nextWaypointIndex == agent.totalWaypoints)
                 {
@@ -76,8 +85,10 @@ namespace NavJob.Systems
                     if (NavAgentSystem.instance.waypoints.TryGetValue (entity.Index, out Vector3[] currentWaypoints))
                     {
                         var agent = data.Agents[item.index];
+                        var position = data.Positions[item.index];
+
                         agent.currentWaypoint = currentWaypoints[agent.nextWaypointIndex];
-                        agent.remainingDistance = Vector3.Distance (agent.position, agent.currentWaypoint);
+                        agent.remainingDistance = math.distance(position.Value, agent.currentWaypoint);
                         agent.nextWaypointIndex++;
                         data.Agents[item.index] = agent;
                     }
@@ -109,7 +120,11 @@ namespace NavJob.Systems
                     return;
                 }
 
+                
                 var agent = data.Agents[index];
+                var position = data.Positions[index];
+                var rotation = data.Rotations[index];
+
                 if (agent.status != AgentStatus.Moving)
                 {
                     return;
@@ -121,26 +136,29 @@ namespace NavJob.Systems
                     // todo: deceleration
                     if (agent.nextPosition.x != Mathf.Infinity)
                     {
-                        agent.position = agent.nextPosition;
+                        position.Value = agent.nextPosition;
                     }
-                    var heading = (Vector3) (agent.currentWaypoint - agent.position);
-                    agent.remainingDistance = heading.magnitude;
+                    var heading = agent.currentWaypoint - position.Value;
+                    agent.remainingDistance = math.length(heading);
                     if (agent.remainingDistance > 0.001f)
                     {
-                        var targetRotation = Quaternion.LookRotation (heading, up).eulerAngles;
-                        targetRotation.x = targetRotation.z = 0;
+                        heading.y = 0.0f;
+                        heading = math.normalize(heading);
+                        var targetRotation = quaternion.lookRotation(heading, up);
                         if (agent.remainingDistance < 1)
                         {
-                            agent.rotation = Quaternion.Euler (targetRotation);
+                            rotation.Value = targetRotation;
                         }
                         else
                         {
-                            agent.rotation = Quaternion.Slerp (agent.rotation, Quaternion.Euler (targetRotation), dt * agent.rotationSpeed);
+                            rotation.Value = math.slerp(rotation.Value, targetRotation, dt * agent.rotationSpeed);
                         }
                     }
-                    var forward = math.forward (agent.rotation) * agent.currentMoveSpeed * dt;
-                    agent.nextPosition = agent.position + forward;
+                    var forward = math.forward (rotation.Value) * agent.currentMoveSpeed * dt;
+                    agent.nextPosition = position.Value + forward;
                     data.Agents[index] = agent;
+                    data.Positions[index] = position;
+                    data.Rotations[index] = rotation;
                 }
                 else if (agent.nextWaypointIndex == agent.totalWaypoints)
                 {
@@ -156,6 +174,8 @@ namespace NavJob.Systems
             public readonly int Length;
             [ReadOnly] public EntityArray Entities;
             public ComponentDataArray<NavAgent> Agents;
+            public ComponentDataArray<Position> Positions;
+            public ComponentDataArray<Rotation> Rotations;
         }
 
         [Inject] private InjectData data;
@@ -179,16 +199,16 @@ namespace NavJob.Systems
         /// <param name="entity"></param>
         /// <param name="agent"></param>
         /// <param name="destination"></param>
-        public void SetDestination (Entity entity, NavAgent agent, Vector3 destination, int areas = -1)
+        public void SetDestination (Entity entity, NavAgent agent, Position position, Rotation rotation, float3 destination)
         {
-            if (pathFindingData.TryAdd (entity.Index, new AgentData { index = entity.Index, entity = entity, agent = agent }))
+            if (pathFindingData.TryAdd (entity.Index, new AgentData { index = entity.Index, entity = entity, agent = agent, position = position, rotation = rotation}))
             {
                 var command = setDestinationBarrier.CreateCommandBuffer ();
                 agent.status = AgentStatus.PathQueued;
                 agent.destination = destination;
                 agent.queryVersion = querySystem.Version;
-                command.SetComponent<NavAgent> (entity, agent);
-                querySystem.RequestPath (entity.Index, agent.position, agent.destination, areas);
+                command.SetComponent<NavAgent>(entity, agent);
+                querySystem.RequestPath (entity.Index, position.Value, agent.destination, agent.areaMask);
             }
         }
 
@@ -198,9 +218,9 @@ namespace NavJob.Systems
         /// <param name="entity"></param>
         /// <param name="agent"></param>
         /// <param name="destination"></param>
-        public static void SetDestinationStatic (Entity entity, NavAgent agent, Vector3 destination, int areas = -1)
+        public static void SetDestinationStatic (Entity entity, NavAgent agent, Position position, Rotation rotation, float3 destination)
         {
-            instance.SetDestination (entity, agent, destination, areas);
+            instance.SetDestination (entity, agent, position, rotation, destination);
         }
 
         protected static NavAgentSystem instance;
@@ -220,7 +240,7 @@ namespace NavJob.Systems
             pathFindingData.Dispose ();
         }
 
-        private void SetWaypoint (Entity entity, NavAgent agent, Vector3[] newWaypoints)
+        private void SetWaypoint (Entity entity, NavAgent agent, Position position, Rotation rotation, Vector3[] newWaypoints)
         {
             waypoints[entity.Index] = newWaypoints;
             var command = pathSuccessBarrier.CreateCommandBuffer ();
@@ -228,15 +248,17 @@ namespace NavJob.Systems
             agent.nextWaypointIndex = 1;
             agent.totalWaypoints = newWaypoints.Length;
             agent.currentWaypoint = newWaypoints[0];
-            agent.remainingDistance = Vector3.Distance (agent.position, agent.currentWaypoint);
+            agent.remainingDistance = math.distance(position.Value, agent.currentWaypoint);
             command.SetComponent<NavAgent> (entity, agent);
+            command.SetComponent<Position>(entity, position);
+            command.SetComponent<Rotation>(entity, rotation);
         }
 
         private void OnPathSuccess (int index, Vector3[] waypoints)
         {
             if (pathFindingData.TryGetValue (index, out AgentData entry))
             {
-                SetWaypoint (entry.entity, entry.agent, waypoints);
+                SetWaypoint (entry.entity, entry.agent, entry.position, entry.rotation, waypoints);
                 pathFindingData.Remove (index);
             }
         }
@@ -247,7 +269,9 @@ namespace NavJob.Systems
             {
                 entry.agent.status = AgentStatus.Idle;
                 var command = pathErrorBarrier.CreateCommandBuffer ();
-                command.SetComponent<NavAgent> (entry.entity, entry.agent);
+                command.SetComponent<NavAgent>(entry.entity, entry.agent);
+                command.SetComponent<Position>(entry.entity, entry.position);
+                command.SetComponent<Rotation>(entry.entity, entry.rotation);
                 pathFindingData.Remove (index);
             }
         }
