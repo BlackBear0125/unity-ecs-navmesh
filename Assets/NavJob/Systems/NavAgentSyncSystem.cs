@@ -8,30 +8,7 @@ using NavJob.Components;
 
 namespace NavJob.Systems
 {
-    /// <summary>
-    /// Syncs the transform matrix from the nav agent to a TransformMatrix component
-    /// </summary>
-    [UpdateAfter (typeof (NavAgentSystem))]
-    [DisableAutoCreation]
-    public class NavAgentToTransfomMatrixSyncSystem : JobComponentSystem
-    {
-
-        [BurstCompile]
-        [RequireSubtractiveComponent (typeof (Position), typeof (Rotation))]
-        private struct NavAgentToTransfomMatrixSyncSystemJob : IJobProcessComponentData<NavAgent, TransformMatrix>
-        {
-            public void Execute ([ReadOnly] ref NavAgent NavAgent, ref TransformMatrix Matrix)
-            {
-                Matrix.Value = Matrix4x4.TRS (NavAgent.position, NavAgent.rotation, Vector3.one);
-            }
-        }
-
-        protected override JobHandle OnUpdate (JobHandle inputDeps)
-        {
-            return new NavAgentToTransfomMatrixSyncSystemJob ().Schedule (this, 64, inputDeps);
-        }
-    }
-
+   
     /// <summary>
     /// Sets the NavAgent position to the Position component
     /// </summary>

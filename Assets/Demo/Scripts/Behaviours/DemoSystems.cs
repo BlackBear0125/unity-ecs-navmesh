@@ -70,19 +70,20 @@ namespace Demo
             base.OnCreateManager (capacity);
             // create the system
             World.Active.CreateManager<NavAgentSystem> ();
-            World.Active.GetOrCreateManager<NavAgentToTransfomMatrixSyncSystem> ();
+            World.Active.GetOrCreateManager<NavAgentToPositionSyncSystem> ();
+            World.Active.GetOrCreateManager<NavAgentToRotationSyncSystem>();
             agent = Getmanager ().CreateArchetype (
                 typeof (NavAgent),
                 // optional avoidance
                 // typeof(NavAgentAvoidance),
                 // optional
-                // typeof (Position),
-                // typeof (Rotation),
-                // typeof (SyncPositionToNavAgent),
-                // typeof (SyncRotationToNavAgent),
-                // typeof (SyncPositionFromNavAgent),
-                // typeof (SyncRotationFromNavAgent),
-                typeof (TransformMatrix)
+                 typeof (Position),
+                 typeof (Rotation),
+                 typeof (SyncPositionToNavAgent),
+                 typeof (SyncRotationToNavAgent),
+                 typeof (SyncPositionFromNavAgent),
+                 typeof (SyncRotationFromNavAgent)
+                
             );
         }
 
@@ -132,7 +133,7 @@ namespace Demo
                 // optional for avoidance
                 // var navAvoidance = new NavAgentAvoidance(2f);
                 // manager.SetComponentData(entity, navAvoidance);
-                manager.AddSharedComponentData (entity, Getspawner ().Renderers[Random.Range (0, Getspawner ().Renderers.Length)].Value);
+                manager.AddSharedComponentData (entity, Getspawner ().Renderers[UnityEngine.Random.Range (0, Getspawner ().Renderers.Length)].Value);
             }
             return;
         }
